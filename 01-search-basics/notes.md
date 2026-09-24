@@ -637,3 +637,412 @@ Key principle:
 Understand the data operation first, then construct the SPL.
 
 SPL commands are tools for expressing the reasoning.
+
+---
+
+# 13. eval
+
+`eval` creates or modifies a field using an expression.
+
+Basic pattern:
+
+| eval new_field=expression
+
+Example:
+
+| eval total=price*quantity
+
+If:
+
+price=50
+quantity=4
+
+Then:
+
+total=200
+
+Mental model:
+
+Existing fields
+  ->
+Calculation / transformation
+  ->
+New or modified field
+
+---
+
+# 14. eval Versus stats
+
+`eval` performs field-level calculation or transformation.
+
+Example:
+
+| eval total=price*quantity
+
+`stats` performs aggregation or summarization.
+
+Example:
+
+| stats sum(total) as grand_total
+
+Mental model:
+
+eval
+  ->
+Calculate / transform fields
+
+stats
+  ->
+Summarize / aggregate results
+
+These commands can be combined in a pipeline.
+
+Example:
+
+| eval total=price*quantity
+| stats sum(total) as grand_total
+
+---
+
+# 15. Chained eval
+
+Multiple `eval` commands can be chained.
+
+Example:
+
+| eval total=price*quantity
+| eval tax=total*0.10
+
+The second `eval` can use a field created by the first `eval`.
+
+Mental model:
+
+price + quantity
+  ->
+total
+  ->
+tax
+
+---
+
+# 16. Modifying an Existing Field
+
+`eval` can also modify the value of an existing field in the current search results.
+
+Example:
+
+| eval status="review"
+
+If the current result contains:
+
+status=500
+
+The resulting value becomes:
+
+status=review
+
+Mental model:
+
+Create field:
+
+| eval new_field=...
+
+Modify field:
+
+| eval existing_field=...
+
+---
+
+# 17. if()
+
+`if()` provides two-way conditional logic.
+
+Basic pattern:
+
+| eval field=if(condition,true_value,false_value)
+
+Example:
+
+| eval severity=if(status=500,"critical","normal")
+
+If:
+
+status=500
+
+Then:
+
+severity=critical
+
+If:
+
+status=404
+
+Then:
+
+severity=normal
+
+Mental model:
+
+Condition
+  |
+  +-- TRUE  -> first result
+  |
+  +-- FALSE -> second result
+
+---
+
+# 18. case()
+
+`case()` provides multiple conditional branches.
+
+Example:
+
+| eval category=case(
+    total>=1000,"high",
+    total>=500,"medium",
+    true(),"low"
+)
+
+Conditions are evaluated from top to bottom.
+
+The first true condition wins.
+
+Example:
+
+total=750
+
+750 >= 1000
+  ->
+FALSE
+
+750 >= 500
+  ->
+TRUE
+  ->
+category=medium
+
+---
+
+# 19. case() Ordering
+
+Condition ordering matters.
+
+Incorrect ordering:
+
+| eval category=case(
+    total>=500,"medium",
+    total>=1000,"high",
+    true(),"low"
+)
+
+If total=1200, the first condition is already true:
+
+1200 >= 500
+  ->
+TRUE
+  ->
+medium
+
+The later high condition is never reached.
+
+Correct ordering:
+
+| eval category=case(
+    total>=1000,"high",
+    total>=500,"medium",
+    true(),"low"
+)
+
+Mental model:
+
+Most specific / highest threshold
+  ->
+Less specific / lower threshold
+  ->
+Fallback
+
+---
+
+# 20. Arithmetic with eval
+
+`eval` supports arithmetic expressions.
+
+Common operators:
+
++
+-
+*
+/
+
+Example:
+
+| eval profit=revenue-cost
+
+Example:
+
+| eval response_seconds=response_time/1000
+
+A calculated field can then be used by later commands.
+
+Example:
+
+| eval response_seconds=response_time/1000
+| stats avg(response_seconds) as avg_seconds by host
+
+Mental model:
+
+Raw measurement
+  ->
+Unit conversion
+  ->
+Aggregation
+  ->
+Analysis
+
+---
+
+# 21. eval -> stats -> where
+
+A calculated field can be created before aggregation.
+
+Example:
+
+| eval response_seconds=response_time/1000
+| stats avg(response_seconds) as avg_seconds by host
+| where avg_seconds > 1
+
+Pipeline:
+
+Raw events
+  ->
+Calculate response_seconds
+  ->
+Average by host
+  ->
+Filter calculated averages
+
+Important:
+
+`where` operates on the current results produced by the previous pipeline stage.
+
+---
+
+# 22. Command Ordering
+
+SPL commands execute from left to right.
+
+Example:
+
+| stats avg(response_time) as avg_response_time by host
+| where avg_response_time > 500
+| sort - avg_response_time
+| head 5
+
+Execution order:
+
+stats
+  ->
+Calculate average by host
+
+where
+  ->
+Keep averages greater than 500
+
+sort
+  ->
+Order highest to lowest
+
+head
+  ->
+Keep the first five rows
+
+Mental model:
+
+Transform
+  ->
+Filter
+  ->
+Order
+  ->
+Select
+
+---
+
+# 23. sort + head + tail
+
+`sort` determines result ordering.
+
+Descending:
+
+| sort - count
+
+Ascending:
+
+| sort count
+
+`head` selects the first rows.
+
+`tail` selects the last rows.
+
+Examples:
+
+| sort - count
+| head 3
+
+Returns the three highest-count rows.
+
+Example:
+
+| sort count
+| tail 3
+
+Also returns the three highest-count rows.
+
+Example:
+
+| sort - count
+| tail 3
+
+Returns the three lowest-count rows.
+
+Example:
+
+| sort count
+| head 3
+
+Returns the three lowest-count rows.
+
+Key principle:
+
+The result of `head` or `tail` depends on the ordering created by `sort`.
+
+---
+
+# 24. Core Transformation Mental Model
+
+A common analytical pipeline can be understood as:
+
+Raw events
+  ->
+Calculate / transform
+  ->
+Aggregate
+  ->
+Filter calculated results
+  ->
+Sort
+  ->
+Select
+
+Example:
+
+| eval response_seconds=response_time/1000
+| stats avg(response_seconds) as avg_seconds by host
+| where avg_seconds > 1
+| sort - avg_seconds
+| head 5
+
+The important skill is not memorizing the command sequence.
+
+The important skill is translating the requirement into data operations first, then expressing those operations in SPL.
+
